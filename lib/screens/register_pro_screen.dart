@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:app_mali_services_pro/services/api_service.dart';
-import 'home_screen.dart'; // Assure-toi que l'import de ton écran d'accueil est correct
+import 'home_screen.dart';
+import 'package:intl/intl.dart'; 
+import 'package:app_mali_services_pro/models/Category.dart'; // Importation de ta classe Category
 
 class RegisterProScreen extends StatefulWidget {
   const RegisterProScreen({super.key});
@@ -13,20 +15,25 @@ class _RegisterProScreenState extends State<RegisterProScreen> {
   // Étape actuelle du formulaire (1: Informations, 2: Sécurité, 3: Profil Pro)
   int _currentStep = 1;
   bool _isLoading = false; // Permet de suivre l'état de soumission
+  bool _isLoadingCategories = true; // État de chargement des catégories depuis l'API
   final ApiService _apiService = ApiService();
+
+  // Liste dynamique des catégories récupérées du serveur
+  List<Category> _categories = [];
 
   // Contrôleurs de saisie
   final _nomController = TextEditingController();
   final _prenomController = TextEditingController();
   final _dateNaissanceController = TextEditingController();
+  String _formattedDateForApi = "";
   
   final _phoneController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
 
   final _experienceController = TextEditingController();
-  String? _selectedCategory;
   String? _selectedZone;
+  int? _selectedCategoryId; // L'ID numérique envoyé à Laravel
 
   // États pour afficher/masquer le mot de passe
   bool _obscurePassword = true;
@@ -38,70 +45,37 @@ class _RegisterProScreenState extends State<RegisterProScreen> {
   final Color _greyText = const Color(0xFF6B7280);    // Gris secondaire
   final Color _bgLight = const Color(0xFFF8F9FA);     // Fond très clair
 
-  // --- LOGIQUE D'APPEL DE L'API ---
-  Future<void> _registerPro() async {
-    // Petites validations de sécurité avant d'appeler l'API
-    if (_phoneController.text.trim().isEmpty || _passwordController.text.isEmpty) {
-      _showSnackBar("Veuillez remplir votre numéro et mot de passe.", Colors.red);
-      return;
-    }
+  @override
+  void initState() {
+    super.initState();
+    _loadCategories(); // Charge les catégories dès l'ouverture de l'écran
+  }
 
-    if (_passwordController.text != _confirmPasswordController.text) {
-      _showSnackBar("Les mots de passe ne correspondent pas.", Colors.red);
-      return;
-    }
-
-    setState(() {
-      _isLoading = true; // Lance le chargement visuel sur le bouton
-    });
-
+  // --- CHARGEMENT DES CATÉGORIES DEPUIS L'API ---
+  Future<void> _loadCategories() async {
     try {
-      // Appel de l'API avec les paramètres nommés exacts
-      final response = await _apiService.register(
-        name: _nomController.text.trim(),
-        firstname: _prenomController.text.trim(),
-        birthDate: _dateNaissanceController.text.trim(),
-        phone: _phoneController.text.trim(),
-        password: _passwordController.text,
-        passwordConfirmation: _confirmPasswordController.text,
-        role: 'pro', // On passe 'pro' pour que le backend valide la catégorie, l'expérience et la zone
-        categoryId: _selectedCategory,
-        experienceYears: _experienceController.text.trim(),
-        interventionZone: _selectedZone,
-        specialty: null, // Non utilisé pour l'instant
-      );
-
-      if (response['status'] == 'success') {
-        // Enregistre le token si ton API le renvoie dans response['data']['token']
-        if (response['data'] != null && response['data']['token'] != null) {
-          await _apiService.saveToken(response['data']['token']);
-        }
-
-        _showSnackBar("Compte créé avec succès !", Colors.green);
-
-        // Navigation vers la page Home en nettoyant l'historique
-        if (mounted) {
-          Navigator.pushAndRemoveUntil(
-            context,
-            MaterialPageRoute(builder: (context) => const HomeScreen()),
-            (route) => false,
-          );
-        }
-      } else {
-        // Affiche l'erreur renvoyée par le serveur (ex: numéro déjà pris, etc.)
-        _showSnackBar(response['message'] ?? "Erreur lors de l'inscription.", Colors.red);
-      }
+      final List<Category> categories = await _apiService.getCategories();
+      setState(() {
+        _categories = categories;
+        _isLoadingCategories = false;
+      });
     } catch (e) {
-      _showSnackBar("Impossible de joindre le serveur. Vérifie ta connexion.", Colors.red);
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false; // Arrête le chargement pour permettre de réessayer si besoin
-        });
-      }
+      // En cas d'erreur de connexion, on charge des catégories par défaut pour que l'écran reste fonctionnel
+      setState(() {
+        _categories = [
+          Category(id: 1, name: "Plomberie", icon: ""),
+          Category(id: 2, name: "Électricité", icon: ""),
+          Category(id: 3, name: "Maçonnerie", icon: ""),
+          Category(id: 4, name: "Peinture", icon: ""),
+          Category(id: 5, name: "Menuiserie", icon: ""),
+        ];
+        _isLoadingCategories = false;
+      });
+      _showSnackBar("Connexion au serveur impossible. Chargement des métiers par défaut.", Colors.orange);
     }
   }
 
+  // --- MÉTHODE SNACKBAR ---
   void _showSnackBar(String message, Color color) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -112,12 +86,76 @@ class _RegisterProScreenState extends State<RegisterProScreen> {
     );
   }
 
+  // --- LOGIQUE D'APPEL DE L'API POUR INSCRIPTION ---
+  Future<void> _registerPro() async {
+    if (_phoneController.text.trim().isEmpty || _passwordController.text.isEmpty) {
+      _showSnackBar("Veuillez remplir votre numéro et mot de passe.", Colors.red);
+      return;
+    }
+
+    if (_passwordController.text != _confirmPasswordController.text) {
+      _showSnackBar("Les mots de passe ne correspondent pas.", Colors.red);
+      return;
+    }
+
+    if (_selectedCategoryId == null) {
+      _showSnackBar("Veuillez choisir une catégorie professionnelle.", Colors.red);
+      return;
+    }
+
+    setState(() {
+      _isLoading = true; // Lance le chargement visuel
+    });
+
+    try {
+      // Appel de l'API avec l'ID numérique de la catégorie
+      final response = await _apiService.register(
+        name: _nomController.text.trim(),
+        firstname: _prenomController.text.trim(),
+        birthDate: _formattedDateForApi,
+        phone: _phoneController.text.trim(),
+        password: _passwordController.text,
+        passwordConfirmation: _confirmPasswordController.text,
+        role: 'pro',
+        categoryId: _selectedCategoryId.toString(), // Envoi de l'ID à la place du texte
+        experienceYears: _experienceController.text.trim(),
+        interventionZone: _selectedZone,
+        specialty: null, 
+      );
+
+      if (response['status'] == 'success') {
+        if (response['data'] != null && response['data']['token'] != null) {
+          await _apiService.saveToken(response['data']['token']);
+        }
+
+        _showSnackBar("Compte créé avec succès !", Colors.green);
+
+        if (mounted) {
+          Navigator.pushAndRemoveUntil(
+            context,
+            MaterialPageRoute(builder: (context) => const HomeScreen()),
+            (route) => false,
+          );
+        }
+      } else {
+        _showSnackBar(response['message'] ?? "Erreur lors de l'inscription.", Colors.red);
+      }
+    } catch (e) {
+      _showSnackBar("Impossible de joindre le serveur. Vérifie ta connexion.", Colors.red);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
   // Action du bouton de validation d'étape
   void _handleNextStep() {
     if (_currentStep < 3) {
       setState(() => _currentStep++);
     } else {
-      // Étape 3 atteinte : Soumission finale vers l'API
       _registerPro();
     }
   }
@@ -132,7 +170,7 @@ class _RegisterProScreenState extends State<RegisterProScreen> {
         leading: IconButton(
           icon: Icon(Icons.arrow_back, color: _primaryDark),
           onPressed: _isLoading 
-              ? null // Désactive le bouton retour pendant le chargement
+              ? null 
               : () {
                   if (_currentStep > 1) {
                     setState(() => _currentStep--);
@@ -145,10 +183,8 @@ class _RegisterProScreenState extends State<RegisterProScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            // 1. BARRE DE PROGRESSION DES ÉTAPES
             _buildStepIndicator(),
             
-            // 2. FORMULAIRE DYNAMIQUE DÉFILANT (Évite l'overflow du clavier)
             Expanded(
               child: SingleChildScrollView(
                 physics: const BouncingScrollPhysics(),
@@ -162,15 +198,14 @@ class _RegisterProScreenState extends State<RegisterProScreen> {
                     
                     const SizedBox(height: 40),
                     
-                    // BOUTON PRINCIPAL (Avec indicateur de chargement circulaire si en cours)
                     SizedBox(
                       width: double.infinity,
                       height: 55,
                       child: ElevatedButton(
-                        onPressed: _isLoading ? null : _handleNextStep, // Désactive le clic si chargement
+                        onPressed: _isLoading ? null : _handleNextStep,
                         style: ElevatedButton.styleFrom(
                           backgroundColor: _primaryDark,
-                          disabledBackgroundColor: _primaryDark.withOpacity(0.6), // Rendu discret au chargement
+                          disabledBackgroundColor: _primaryDark.withOpacity(0.6),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
                           ),
@@ -197,16 +232,13 @@ class _RegisterProScreenState extends State<RegisterProScreen> {
                     ),
                     const SizedBox(height: 20),
                     
-                    // LIEN CONNEXION
                     Center(
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           Text("Vous avez déjà un compte ? ", style: TextStyle(color: _greyText)),
                           GestureDetector(
-                            onTap: _isLoading 
-                                ? null // Empêche de revenir en arrière pendant la requête
-                                : () => Navigator.pop(context),
+                            onTap: _isLoading ? null : () => Navigator.pop(context),
                             child: Text(
                               "Se connecter",
                               style: TextStyle(
@@ -354,13 +386,42 @@ class _RegisterProScreenState extends State<RegisterProScreen> {
         const SizedBox(height: 30),
         
         _buildLabel("Catégorie de métier"),
-        _buildDropdownField(
-          value: _selectedCategory,
-          hint: "Sélectionnez votre catégorie",
-          icon: Icons.work_outline,
-          items: ["Plomberie", "Électricité", "Maçonnerie", "Peinture", "Menuiserie"],
-          onChanged: (value) => setState(() => _selectedCategory = value),
-        ),
+        _isLoadingCategories
+            ? const Center(
+                child: Padding(
+                  padding: EdgeInsets.symmetric(vertical: 12.0),
+                  child: CircularProgressIndicator(),
+                ),
+              )
+            : Row(
+                children: [
+                  Expanded(
+                    child: _buildCategoryDropdownField(
+                      value: _selectedCategoryId,
+                      hint: "Sélectionnez votre catégorie",
+                      icon: Icons.work_outline,
+                      items: _categories,
+                      onChanged: (int? value) {
+                        setState(() {
+                          _selectedCategoryId = value;
+                        });
+                      },
+                    ),
+                  ),
+                  // Si on est en mode secours (pas d'API), on affiche un bouton pour retenter le coup
+                  if (_categories.length <= 5 && _categories.any((c) => c.icon.isEmpty))
+                    IconButton(
+                      icon: Icon(Icons.sync, color: _accentBlue),
+                      tooltip: "Recharger depuis le serveur",
+                      onPressed: () {
+                        setState(() {
+                          _isLoadingCategories = true;
+                        });
+                        _loadCategories();
+                      },
+                    ),
+                ],
+              ),
         const SizedBox(height: 20),
         
         _buildLabel("Années d'expérience"),
@@ -377,7 +438,7 @@ class _RegisterProScreenState extends State<RegisterProScreen> {
         const SizedBox(height: 20),
         
         _buildLabel("Zone d'intervention"),
-        _buildDropdownField(
+        _buildZoneDropdownField(
           value: _selectedZone,
           hint: "Sélectionnez vos zones",
           icon: Icons.location_on_outlined,
@@ -429,7 +490,7 @@ class _RegisterProScreenState extends State<RegisterProScreen> {
         keyboardType: keyboardType,
         readOnly: readOnly,
         onTap: onTap,
-        enabled: !_isLoading, // Bloque la saisie pendant la requête
+        enabled: !_isLoading,
         decoration: InputDecoration(
           hintText: hint,
           hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 14),
@@ -453,7 +514,51 @@ class _RegisterProScreenState extends State<RegisterProScreen> {
     );
   }
 
-  Widget _buildDropdownField({
+  // Dropdown pour les catégories dynamiques
+  Widget _buildCategoryDropdownField({
+    required int? value,
+    required String hint,
+    required IconData icon,
+    required List<Category> items,
+    required ValueChanged<int?> onChanged,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.02),
+            blurRadius: 6,
+            offset: const Offset(0, 3),
+          )
+        ],
+      ),
+      child: DropdownButtonFormField<int>(
+        value: value,
+        hint: Text(hint, style: TextStyle(color: Colors.grey.shade400, fontSize: 14)),
+        icon: Icon(Icons.expand_more, color: _primaryDark),
+        decoration: InputDecoration(
+          prefixIcon: Icon(icon, color: _primaryDark),
+          border: InputBorder.none,
+          contentPadding: const EdgeInsets.symmetric(vertical: 12),
+        ),
+        items: _isLoading 
+            ? null 
+            : items.map((Category cat) {
+                return DropdownMenuItem<int>(
+                  value: cat.id, // L'ID (ex: 1) est transmis
+                  child: Text(cat.name, style: TextStyle(color: _primaryDark)), // Le nom est affiché
+                );
+              }).toList(),
+        onChanged: _isLoading ? null : onChanged,
+      ),
+    );
+  }
+
+  // Dropdown pour les zones (statiques)
+  Widget _buildZoneDropdownField({
     required String? value,
     required String hint,
     required IconData icon,
@@ -483,7 +588,7 @@ class _RegisterProScreenState extends State<RegisterProScreen> {
           contentPadding: const EdgeInsets.symmetric(vertical: 12),
         ),
         items: _isLoading 
-            ? null // Désactive le menu déroulant au chargement
+            ? null 
             : items.map((String item) {
                 return DropdownMenuItem<String>(
                   value: item,
@@ -563,22 +668,27 @@ class _RegisterProScreenState extends State<RegisterProScreen> {
 
   // Sélectionneur de date
   Future<void> _selectDate(BuildContext context) async {
-    if (_isLoading) return; // Bloque le calendrier en plein chargement
+    if (_isLoading) return; 
+    
     final DateTime? picked = await showDatePicker(
       context: context,
       initialDate: DateTime(2000),
       firstDate: DateTime(1950),
       lastDate: DateTime.now(),
     );
+    
     if (picked != null) {
       setState(() {
         String year = picked.year.toString();
-        String month = picked.month.toString().padLeft(2,'0');
+        String month = picked.month.toString().padLeft(2, '0');
         String day = picked.day.toString().padLeft(2, '0');
-        _dateNaissanceController.text = "$year-$month-$day";
+        
+        // 1. Ce que l'utilisateur voit à l'écran (ex: 08/08/1995)
+        _dateNaissanceController.text = "$day/$month/$year";
+        
+        // 2. Ce qu'on sauvegarde en arrière-plan pour l'API Laravel (ex: 1995-08-08)
+        _formattedDateForApi = "$year-$month-$day";
       });
-    
-    
     }
   }
 }

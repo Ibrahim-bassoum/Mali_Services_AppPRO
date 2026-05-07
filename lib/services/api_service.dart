@@ -1,10 +1,11 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:app_mali_services_pro/models/Category.dart';
 
 class ApiService {
   // 10.0.2.2 pour l'émulateur Android, utilise ton IP locale pour un vrai téléphone
-  final String baseUrl = "http://192.168.1.18:8000/api"; 
+  final String baseUrl = "http://192.168.1.2:8000/api"; 
 
   // --- CONNEXION (LOGIN) ---
   Future<Map<String, dynamic>> login(String phone, String password) async {
@@ -109,4 +110,23 @@ class ApiService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('auth_token');
   }
+
+  Future<List<Category>> getCategories() async {
+  final response = await http.get(
+    Uri.parse('$baseUrl/categories'), // Ajuste l'URL selon tes routes d'API
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+    },
+  );
+
+  if (response.statusCode == 200) {
+    final Map<String, dynamic> data = json.decode(response.body);
+    // On suppose que ton API Laravel retourne un JSON avec {'status': 'success', 'data': [...]}
+    final List<dynamic> categoriesJson = data['data']; 
+    return categoriesJson.map((json) => Category.fromJson(json)).toList();
+  } else {
+    throw Exception('Échec du chargement des catégories');
+  }
+}
 }
