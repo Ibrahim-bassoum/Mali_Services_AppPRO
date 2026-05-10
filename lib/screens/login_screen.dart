@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_service.dart';
-import 'package:app_mali_services_pro/screens/home_screen.dart'; // Supposons que ton Dashboard s'appelle HomeScreen
+import 'package:app_mali_services_pro/screens/home_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -10,22 +11,22 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  // CONTRÔLEURS
+  // --- CONTRÔLEURS ---
   final _phoneController = TextEditingController();
   final _passwordController = TextEditingController();
   final ApiService _apiService = ApiService();
   
-  // ÉTAT DE LA PAGE
+  // --- ÉTAT DE LA PAGE ---
   bool _isLoading = false;
   bool _obscurePassword = true;
 
-  // COULEURS DU DESIGN
-  final Color _primaryColor = const Color(0xFF00235B); // Ton bleu foncé fétiche
+  // --- DESIGN ---
+  final Color _primaryColor = const Color(0xFF00235B); 
   final Color _greyColor = const Color(0xFF6B7280);
 
   // --- GESTION DE LA CONNEXION ---
   void _handleLogin() async {
-    // Validation locale rapide
+    // 1. Validation locale
     if (_phoneController.text.trim().isEmpty || _passwordController.text.trim().isEmpty) {
       _showSnackBar("Veuillez remplir tous les champs", Colors.red);
       return;
@@ -33,34 +34,60 @@ class _LoginScreenState extends State<LoginScreen> {
 
     setState(() => _isLoading = true);
 
-    // Dialogue de chargement
+    // Affichage du loader
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (context) => const Center(child: CircularProgressIndicator()),
     );
 
-    // Appel à l'API
-    final response = await _apiService.login(
-      _phoneController.text.trim(),
-      _passwordController.text,
-    );
-
-    Navigator.pop(context); // Fermer le chargement
-    setState(() => _isLoading = false);
-
-    if (response['status'] == 'success') {
-      _showSnackBar("Connexion réussie !", Colors.green);
-      
-      // Redirection vers le Dashboard en nettoyant la pile de navigation
-      Navigator.pushAndRemoveUntil(
-        context,
-        MaterialPageRoute(builder: (context) => const HomeScreen()),
-        (route) => false, // Efface toutes les pages précédentes
+    try {
+      // 2. Appel à l'API
+      final response = await _apiService.login(
+        _phoneController.text.trim(),
+        _passwordController.text.trim(), // Ajout du trim ici aussi pour le mot de passe
       );
-    } else {
-      // Afficher l'erreur renvoyée par Laravel (ex: Identifiants incorrects)
-      _showSnackBar(response['message'], Colors.red);
+
+      if (!mounted) return;
+      Navigator.pop(context); // Fermer le loader
+
+      // 3. ANALYSE DE LA RÉPONSE (Synchronisée avec ton ApiService)
+      // Ton ApiService renvoie {"status": "success", "data": ...}
+      if (response != null && response['status'] == 'success') {
+        
+        // On récupère le contenu réel renvoyé par Laravel (qui est dans 'data')
+        final apiData = response['data'];
+        final userData = apiData['user']; 
+
+        // 4. SAUVEGARDE LOCALE
+        final prefs = await SharedPreferences.getInstance();
+        
+        // Sauvegarde du nom (C'est ici qu'on règle le problème de l'affichage "Artisan")
+        String proName = userData['name'] ?? 'Prestataire';
+        await prefs.setString('user_name', proName);
+        
+        // Sauvegarde du token (récupéré dans apiData)
+        await prefs.setString('auth_token', apiData['access_token']);
+
+        _showSnackBar("Bienvenue, $proName !", Colors.green);
+
+        // 5. REDIRECTION
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (context) => const HomeScreen()),
+          (route) => false,
+        );
+      } else {
+        // Erreur renvoyée par l'ApiService (ex: Identifiants incorrects)
+        String errorMsg = response?['message'] ?? "Numéro ou mot de passe incorrect";
+        _showSnackBar(errorMsg, Colors.red);
+      }
+    } catch (e) {
+      if (mounted) Navigator.pop(context);
+      print("ERREUR API : $e");
+      _showSnackBar("Impossible de joindre le serveur. Vérifiez la connexion.", Colors.red);
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -86,19 +113,17 @@ class _LoginScreenState extends State<LoginScreen> {
         child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 24.0),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.center, // Centrer le contenu
             children: [
-              const SizedBox(height: 30),
+              const SizedBox(height: 20),
               
-              // --- TON LOGO ICI ---
+              // LOGO
               Image.asset(
-                'assets/logo.png', // Chemin exact de ton logo
+                'assets/logo.png', 
                 height: 100,
                 errorBuilder: (context, error, stackTrace) => Icon(Icons.handyman, size: 80, color: _primaryColor),
               ),
-              const SizedBox(height: 25),
+              const SizedBox(height: 20),
               
-              // TITRE ET SOUS-TITRE
               Text(
                 "MaliServices Pro",
                 style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: _primaryColor),
@@ -109,24 +134,20 @@ class _LoginScreenState extends State<LoginScreen> {
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 16, color: _greyColor),
               ),
-              const SizedBox(height: 50),
+              const SizedBox(height: 40),
 
-              // --- CHAMPS DE SAISIE (DESIGN MALI) ---
-              
-              // Champ Téléphone
               _buildCustomField(
                 controller: _phoneController,
                 label: "Numéro de téléphone",
-                icon: Icons.phone,
+                icon: Icons.phone_android,
                 isPhone: true,
               ),
               const SizedBox(height: 20),
 
-              // Champ Mot de passe
               _buildCustomField(
                 controller: _passwordController,
                 label: "Mot de passe",
-                icon: Icons.lock,
+                icon: Icons.lock_outline,
                 obscure: _obscurePassword,
                 suffixIcon: IconButton(
                   icon: Icon(_obscurePassword ? Icons.visibility_off : Icons.visibility, color: _primaryColor),
@@ -134,17 +155,8 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
               ),
               
-              // Lien mot de passe oublié (Optionnel)
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton(
-                  onPressed: () { /* Action mot de passe oublié */ },
-                  child: Text("Mot de passe oublié ?", style: TextStyle(color: _primaryColor, fontWeight: FontWeight.w600)),
-                ),
-              ),
-              const SizedBox(height: 40),
+              const SizedBox(height: 30),
 
-              // --- BOUTON SE CONNECTER ---
               SizedBox(
                 width: double.infinity,
                 height: 55,
@@ -154,21 +166,25 @@ class _LoginScreenState extends State<LoginScreen> {
                     backgroundColor: _primaryColor,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
-                  child: const Text(
-                    "Se connecter",
-                    style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
-                  ),
+                  child: _isLoading 
+                    ? const CircularProgressIndicator(color: Colors.white)
+                    : const Text(
+                        "Se connecter",
+                        style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                      ),
                 ),
               ),
+              
               const SizedBox(height: 30),
               
-              // LIEN INSCRIPTION
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   const Text("Nouveau partenaire ? "),
                   GestureDetector(
-                    onTap: () { /* Redirection vers RegisterProScreen */ },
+                    onTap: () {
+                      // Navigator.push... vers RegisterScreen
+                    },
                     child: Text(
                       "Créer un compte",
                       style: TextStyle(color: _primaryColor, fontWeight: FontWeight.bold),
@@ -176,7 +192,6 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 ],
               ),
-              const SizedBox(height: 20),
             ],
           ),
         ),
@@ -184,7 +199,6 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  // --- WIDGET UTILITAIRE POUR LES CHAMPS (Réutilisable) ---
   Widget _buildCustomField({
     required TextEditingController controller,
     required String label,
@@ -203,11 +217,11 @@ class _LoginScreenState extends State<LoginScreen> {
         labelText: label,
         labelStyle: TextStyle(color: _greyColor),
         filled: true,
-        fillColor: Colors.white,
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+        fillColor: const Color(0xFFF9FAFB),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.grey.shade300),
+          borderSide: BorderSide(color: Colors.grey.shade200),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),

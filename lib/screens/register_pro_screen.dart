@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart'; // Import ajouté
 import 'package:app_mali_services_pro/services/api_service.dart';
 import 'home_screen.dart';
 import 'package:intl/intl.dart'; 
@@ -124,9 +125,21 @@ class _RegisterProScreenState extends State<RegisterProScreen> {
       );
 
       if (response['status'] == 'success') {
-        if (response['data'] != null && response['data']['token'] != null) {
-          await _apiService.saveToken(response['data']['token']);
+        // --- MODIFICATION ICI : SAUVEGARDE DU NOM POUR LE HEADER ---
+        final apiData = response['data'];
+        final userData = apiData['user']; 
+
+        final prefs = await SharedPreferences.getInstance();
+        
+        // Sauvegarde du nom (ex: Sali) pour écraser l'ancien (ex: Hadi)
+        String proName = userData?['name'] ?? _nomController.text.trim();
+        await prefs.setString('user_name', proName);
+
+        // Sauvegarde du token
+        if (apiData != null && apiData['access_token'] != null) {
+          await prefs.setString('auth_token', apiData['access_token']);
         }
+        // --- FIN MODIFICATION ---
 
         _showSnackBar("Compte créé avec succès !", Colors.green);
 

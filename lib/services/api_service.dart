@@ -5,7 +5,7 @@ import 'package:app_mali_services_pro/models/Category.dart';
 
 class ApiService {
   // 10.0.2.2 pour l'émulateur Android, utilise ton IP locale pour un vrai téléphone
-  final String baseUrl = "http://192.168.1.2:8000/api"; 
+  final String baseUrl = "http://172.20.10.4:8000/api"; 
 
   // --- CONNEXION (LOGIN) ---
   Future<Map<String, dynamic>> login(String phone, String password) async {
@@ -129,4 +129,19 @@ class ApiService {
     throw Exception('Échec du chargement des catégories');
   }
 }
+
+  Future<bool> updateProStatus(bool isOnline) async {
+  try {
+    final response = await http.post(
+      Uri.parse("$baseUrl/pro/update-status"),
+      headers: {"Content-Type": "application/json"},
+      body: jsonEncode({"is_online": isOnline}),
+    );
+
+    return response.statusCode == 200;
+  } catch (e) {
+    return false;
+  }
+}
+
 }
